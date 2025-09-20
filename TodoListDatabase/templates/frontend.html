@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Helvetica', Arial, sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #343a40;
+        }
+        .todo-item {
+            background-color: #fff;
+            margin: 10px 0;
+            padding: 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .todo-item h3 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: #495057;
+        }
+        .todo-item p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+        .delete-btn {
+            margin-top: 20px;
+        }
+        .btn {
+            margin-top: 10px;
+        }
+        #box {
+            margin-bottom: 20px;
+        }
+    </style>
+    <script>
+        $(document).ready(function () {
+            let currentPage = 1;
+            const itemsPerPage = 5;
+            let todos = []; // 모든 todo 데이터를 저장
+            let totalPages = 1;
+
+            // 불러온 todo 목록을 현재 페이지에 맞게 표시하는 함수
+            function displayTodosForPage(page) {
+                $('#todo-list').empty(); // 기존 목록 초기화
+
+                const startIndex = (page - 1) * itemsPerPage;
+                const endIndex = Math.min(startIndex + itemsPerPage, todos.length);
+                const currentItems = todos.slice(startIndex, endIndex);
+
+                if (currentItems.length > 0) {
+                    currentItems.forEach(todo => {
+                        $('#todo-list').append(`
+                            <div class="todo-item" data-id="${todo.id}">
+                                <input type="checkbox" class="form-check-input todo-checkbox">
+                                <h3>${todo.title}</h3>
+                                <p>${todo.description}</p>
+                                <p><strong>Created at:</strong> ${new Date(todo.created_at).toLocaleString()}</p>
+                                <button class="btn btn-warning edit-btn">Edit</button>
+                            </div>
+                        `);
+                    });
+                } else {
+                    $('#todo-list').append(`<p>No todos to display</p>`);
+                }
+
+                // 페이지 정보 업데이트
+                $('#pagination-info').text(`${page}/${totalPages}`);
+            }
+
+            // 전체 todo 목록을 로드하고 페이지 계산
+            async function loadTodos() {
+                try {
+                    let response = await fetch('/todos'); // 모든 todos를 가져오는 API 호출
+                    if (!response.ok) {
+                        throw new Error('Failed to load todos');
+                    }
+                    todos = await response.json();
+                    totalPages = Math.ceil(todos.length / itemsPerPage);
+
+                    displayTodosForPage(currentPage); // 첫 페이지를 표시
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+
+            // Todo 추가
+            $("#record").click(async function () {
+                let title = $('#title').val();
+                let description = $('#description').val();
+                
+                if (!title) {
+                    alert('Title is required!');
+                    return;
+                }
+
+                try {
+                    let response = await fetch('/todo', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            title: title,
+                            description: description
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to add todo');
+                    }
+
+                    let todo = await response.json();
+                    
+                    todos.push(todo); // 새 todo를 배열에 추가
+                    totalPages = Math.ceil(todos.length / itemsPerPage); // 페이지 수 업데이트
+                    displayTodosForPage(currentPage);
+                    
+                    $('#title').val('');
+                    $('#description').val('');
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            });
+
+            // Todo 삭제
+            $("#delete").click(async function () {
+                let idsToDelete = [];
+
+                $(".todo-checkbox:checked").each(function () {
+                    let todoId = $(this).closest('.todo-item').data('id');
+                    idsToDelete.push(todoId);
+                });
+
+                if (idsToDelete.length === 0) {
+                    alert('No todos selected for deletion.');
+                    return;
+                }
+
+                try {
+                    let response = await fetch('/delete-todos', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ ids: idsToDelete })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to delete todos');
+                    }
+
+                    todos = todos.filter(todo => !idsToDelete.includes(todo.id)); // 배열에서 삭제
+                    totalPages = Math.ceil(todos.length / itemsPerPage); // 페이지 수 업데이트
+                    if (currentPage > totalPages) {
+                        currentPage = totalPages; // 현재 페이지 조정
+                    }
+                    displayTodosForPage(currentPage);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            });
+
+            // Search 버튼 클릭 시 특정 제목을 가진 항목만 불러오는 기능
+            $("#search-btn").click(async function () {
+                let searchTitle = $('#search-title').val().trim();
+
+                if (!searchTitle) {
+                    // 검색 제목이 비어있을 경우 모든 todos를 로드
+                    await loadTodos(); // 모든 todos를 로드
+                    return; // 함수를 종료하여 더 이상 진행하지 않도록 합니다.
+                }
+
+                try {
+                    let response = await fetch(`/todos/search?keyword=${searchTitle}`);
+                    if (!response.ok) {
+                        throw new Error('Failed to search todos');
+                    }
+
+                    todos = await response.json(); // 검색된 결과를 배열에 저장
+                    totalPages = Math.ceil(todos.length / itemsPerPage); // 페이지 수 계산
+                    currentPage = 1; // 검색 결과가 새로 로드되면 첫 페이지부터 시작
+                    displayTodosForPage(currentPage);
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            });
+
+            // 페이지 이동 버튼 처리
+            $('#next').click(function () {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    displayTodosForPage(currentPage);
+                }
+            });
+
+            $('#previous').click(function () {
+                if (currentPage > 1) {
+                    currentPage--;
+                    displayTodosForPage(currentPage);
+                }
+            });
+
+            // Edit 버튼 클릭 시의 기능
+            $(document).on('click', '.edit-btn', function () {
+                const todoItem = $(this).closest('.todo-item');
+                const todoId = todoItem.data('id');
+                const currentTitle = todoItem.find('h3').text();
+                const currentDescription = todoItem.find('p').eq(0).text();
+
+                // Alert를 사용하여 title과 description 수정하기
+                const newTitle = prompt('Edit Title:', currentTitle);
+                const newDescription = prompt('Edit Description:', currentDescription);
+
+                if (newTitle !== null && newDescription !== null) {
+                    // 업데이트된 값으로 UI 수정
+                    todoItem.find('h3').text(newTitle);
+                    todoItem.find('p').eq(0).text(newDescription);
+
+                    // 서버에 업데이트 요청
+                    updateTodoInDatabase(todoId, newTitle, newDescription);
+                }
+            });
+
+            // Todo 업데이트 함수
+            async function updateTodoInDatabase(id, title, description) {
+                try {
+                    let response = await fetch(`/todo/${id}`, {
+                        method: 'PUT', // PUT 메서드 사용
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ title, description })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to update todo');
+                    }
+
+                    // 업데이트된 데이터를 todos 배열에서 업데이트
+                    const todoIndex = todos.findIndex(todo => todo.id === id);
+                    if (todoIndex !== -1) {
+                        todos[todoIndex].title = title;
+                        todos[todoIndex].description = description;
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                }
+            }
+
+            // 초기 페이지 로드
+            loadTodos();
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Todo App</h1>
+        <div id="box">
+            <div class="mb-3">
+                <label for="title" class="form-label">What needs to be done?</label>
+                <input type="text" class="form-control" id="title" placeholder="Enter task title">
+            </div>
+            <div class="mb-3">
+                <label for="description" class="form-label">Add a description (optional)</label>
+                <input type="text" class="form-control" id="description" placeholder="Enter task description">
+            </div>
+            <button class="btn btn-primary" id="record">Add Todo</button>
+            <button class="btn btn-danger" id="delete">Delete Selected</button>
+        </div>
+        <div class="mb-3">
+            <label for="search-title" class="form-label">Search Todos</label>
+            <input type="text" class="form-control" id="search-title" placeholder="Enter title to search">
+            <button class="btn btn-secondary" id="search-btn">Search</button>
+        </div>
+        <div id="todo-list"></div>
+        <div id="pagination-info" class="text-center"></div>
+        <div class="text-center">
+            <button id="previous" class="btn btn-outline-secondary">Previous</button>
+            <button id="next" class="btn btn-outline-secondary">Next</button>
+        </div>
+    </div>
+</body>
+</html>
